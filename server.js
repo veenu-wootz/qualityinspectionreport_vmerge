@@ -147,61 +147,46 @@ async function buildIndexPage({ reportNo, partName, date, inspectionPage, certEn
   return Buffer.from(await doc.save());
 }
 
-/** Stamp page numbers at the bottom of every page in a PDF */
-async function stampPageNumbers(pdfBytes, startPageNum, label) {
+/** Stamp page numbers at the bottom of every page in a PDF.
+ *  Font size is normalized to ~9pt relative to A4 width (595pt landscape = 841pt).
+ *  This keeps numbers visually consistent regardless of the cert PDF's page size.
+ */
+async function stampPageNumbers(pdfBytes, startPageNum) {
   const pdf      = await PDFDocument.load(pdfBytes, { ignoreEncryption:true });
   const font     = await pdf.embedFont(StandardFonts.Helvetica);
-  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
 
   pdf.getPages().forEach((page, i) => {
-    const { width } = page.getSize();
-    page.drawRectangle({ x:0, y:0, width, height:18,
-      color:rgb(0.97,0.97,0.97), opacity:0.9 });
-    if (i === 0 && label) {
-      page.drawText(label, {
-        x:20, y:5, size:7, font, color:rgb(0.55,0.55,0.55),
-      });
-    }
+    const { width, height } = page.getSize();
+
+    // Normalize: target ~9pt on A4 landscape width (841pt). Scale to actual page width.
+    const BASE_WIDTH  = 841;
+    const TARGET_SIZE = 9;
+    const fontSize    = Math.round((width / BASE_WIDTH) * TARGET_SIZE * 10) / 10;
+    const barH        = fontSize * 2.4;
+
+    // Subtle light bar at bottom
+    page.drawRectangle({
+      x:0, y:0, width, height:barH,
+      color:rgb(0.96,0.96,0.96),
+      opacity:0.85,
+    });
+
+    // Page number — centred, dark gray (not red)
     const pgStr = String(startPageNum + i);
-    const pgW   = fontBold.widthOfTextAtSize(pgStr, 9);
+    const pgW   = font.widthOfTextAtSize(pgStr, fontSize);
     page.drawText(pgStr, {
-      x: width/2 - pgW/2, y:5,
-      size:9, font:fontBold, color:rgb(0.78,0.29,0.17),
+      x: width/2 - pgW/2,
+      y: barH * 0.28,
+      size: fontSize,
+      font,
+      color: rgb(0.25, 0.25, 0.25),
     });
   });
 
   return Buffer.from(await pdf.save());
 }
 
-/** Stamp a heading banner on the first page of a PDF */
-async function stampHeading(pdfBytes, label) {
-  if (!label?.trim()) return pdfBytes;
-  try {
-    const pdf  = await PDFDocument.load(pdfBytes, { ignoreEncryption:true });
-    const page = pdf.getPages()[0];
-    const font = await pdf.embedFont(StandardFonts.HelveticaBold);
-    const { width, height } = page.getSize();
-    const fontSize = 14, barH = 28;
 
-    page.drawRectangle({
-      x:0, y:height-barH, width, height:barH,
-      color:rgb(1,1,1), opacity:0.9,
-    });
-    page.drawLine({
-      start:{x:0, y:height-barH}, end:{x:width, y:height-barH},
-      thickness:1.5, color:rgb(0.78,0.29,0.17),
-    });
-    const textW = font.widthOfTextAtSize(label, fontSize);
-    page.drawText(label, {
-      x: (width-textW)/2,
-      y: height - barH + (barH-fontSize)/2 + 2,
-      size:fontSize, font, color:rgb(0.1,0.1,0.18),
-    });
-    return Buffer.from(await pdf.save());
-  } catch(e) {
-    return pdfBytes;
-  }
-}
 
 // ── POST /merge ───────────────────────────────────────────────
 /**
@@ -291,10 +276,9 @@ app.post('/merge', async (req, res) => {
       merged.addPage(qirPages[i]);
     }
 
-    // Certificates with headings + page numbers
+    // Certificates with page numbers
     for (const cert of certEntries) {
-      let bytes = await stampHeading(cert.bytes, cert.label);
-      bytes     = await stampPageNumbers(bytes, cert.startPage, cert.label);
+      let bytes = await stampPageNumbers(cert.bytes, cert.startPage);
       const cp  = await PDFDocument.load(bytes, { ignoreEncryption:true });
       const pgs = await merged.copyPages(cp, cp.getPageIndices());
       pgs.forEach(p => merged.addPage(p));
