@@ -25,6 +25,8 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '50mb' }));
 
+app.use((req, res, next) => { if (req.method === 'POST') console.log('RAW PAYLOAD:', JSON.stringify(req.body, null, 2)); next(); });
+
 app.get('/', (req, res) => {
   res.json({ status: 'ok', service: 'QIR Merge Server', version: '1.0.0' });
 });
@@ -59,18 +61,10 @@ async function buildIndexPage({ reportNo, partName, date, inspectionPage, certEn
   page.drawRectangle({ x:0, y:0, width:W, height:H, color:WHITE });
 
   // Title
-  page.drawText('Quality Inspection Report', {
-    x:40, y:H-52, size:20, font:fontBold, color:BLACK,
-  });
-  page.drawText(`${reportNo}   ·   ${partName}   ·   ${date}`, {
-    x:40, y:H-70, size:9, font:fontNormal, color:MGRAY,
-  });
-  page.drawLine({
-    start:{x:40,y:H-80}, end:{x:W-40,y:H-80},
-    thickness:0.5, color:LGRAY,
-  });
-  page.drawText('TABLE OF CONTENTS', {
-    x:40, y:H-97, size:8, font:fontBold, color:MGRAY,
+  const tocLabel = 'TABLE OF CONTENTS';
+  const tocW = fontBold.widthOfTextAtSize(tocLabel, 11);
+  page.drawText(tocLabel, {
+    x: W/2 - tocW/2, y: H-52, size:11, font:fontBold, color:BLACK,
   });
 
   // Table layout
@@ -78,7 +72,7 @@ async function buildIndexPage({ reportNo, partName, date, inspectionPage, certEn
   const TBL_W  = W - 80;
   const PAD    = 10;
   const ROW_H  = 24;
-  let   rowY   = H - 112;
+  let   rowY   = H - 72;
   const tableTopY = rowY;
 
   function drawRow(label, pageNum, isSub=false, isHeader=false) {
