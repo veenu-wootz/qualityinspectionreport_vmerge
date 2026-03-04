@@ -7,9 +7,10 @@
  *   POST /merge     merge QIR + certs, return final PDF
  */
 
-const express = require('express');
-const fetch   = require('node-fetch');
+const express            = require('express');
+const fetch              = require('node-fetch');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
+const { sendQIREmail }   = require('./sendEmail');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -58,18 +59,26 @@ async function buildIndexPage({ reportNo, partName, date, inspectionPage, certEn
   page.drawRectangle({ x:0, y:0, width:W, height:H, color:WHITE });
 
   // Title
-  const tocLabel = 'Table of Contents';
-  const tocW = fontBold.widthOfTextAtSize(tocLabel, 11);
-  page.drawText(tocLabel, {
-    x: W/2 - tocW/2, y: H-52, size:11, font:fontBold, color:BLACK,
+  page.drawText('Quality Inspection Report', {
+    x:40, y:H-52, size:20, font:fontBold, color:BLACK,
   });
-  
+  page.drawText(`${reportNo}   ·   ${partName}   ·   ${date}`, {
+    x:40, y:H-70, size:9, font:fontNormal, color:MGRAY,
+  });
+  page.drawLine({
+    start:{x:40,y:H-80}, end:{x:W-40,y:H-80},
+    thickness:0.5, color:LGRAY,
+  });
+  page.drawText('TABLE OF CONTENTS', {
+    x:40, y:H-97, size:8, font:fontBold, color:MGRAY,
+  });
+
   // Table layout
   const TBL_X  = 40;
   const TBL_W  = W - 80;
   const PAD    = 10;
   const ROW_H  = 24;
-  let   rowY   = H - 72;
+  let   rowY   = H - 112;
   const tableTopY = rowY;
 
   function drawRow(label, pageNum, isSub=false, isHeader=false) {
@@ -191,7 +200,7 @@ async function stampPageNumbersOnDoc(pdfDoc, pageIndexOffset, startPageNum) {
 
 // ── POST /merge ───────────────────────────────────────────────
 app.post('/merge', async (req, res) => {
-  const { reportNo='QIR', partName='', date='', qirSource, certificates=[] } = req.body;
+  const { reportNo='QIR', partName='', date='', yourEmail='', qirSource, certificates=[] } = req.body;
   console.log(`\n── /merge: ${reportNo} — ${certificates.length} cert(s)`);
 
   try {
@@ -278,6 +287,15 @@ app.post('/merge', async (req, res) => {
     const filename   = `QIR-${reportNo}-${date}.pdf`.replace(/[^a-zA-Z0-9\-_.]/g, '_');
     console.log(`✓ ${merged.getPageCount()} pages, ${(finalBytes.length/1024).toFixed(0)} KB\n`);
 
+    // 7. Send email
+    console.log('[7] Sending email...');
+    try {
+      await sendQIREmail({ reportNo, partName, date, yourEmail }, Buffer.from(finalBytes), filename);
+    } catch(emailErr) {
+      // Don't fail the whole request if email fails — PDF is still returned
+      console.error('  Email failed:', emailErr.message);
+    }
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(Buffer.from(finalBytes));
@@ -292,4 +310,7 @@ app.listen(PORT, () => {
   console.log(`\nQIR Merge Server on port ${PORT}`);
   console.log(`Health: GET  /`);
   console.log(`Merge:  POST /merge\n`);
+  if (!process.env.SMTP_USER)        console.warn('⚠  SMTP_USER not set');
+  if (!process.env.SMTP_PASSWORD)    console.warn('⚠  SMTP_PASSWORD not set');
+  if (!process.env.INTERNAL_EMAILS)  console.warn('⚠  INTERNAL_EMAILS not set');
 });
