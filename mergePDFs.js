@@ -440,14 +440,21 @@ async function stampWatermark(pdfBytes) {
 
   pdf.getPages().forEach(page => {
     const box      = getVisibleBox(page);
-    const cx       = box.x + box.width  / 2;
-    const cy       = box.y + box.height / 2;
-    const fontSize = Math.min(box.width, box.height) * 0.15;
+    const W        = box.width, H = box.height;
+    const cx       = box.x + W / 2;
+    const cy       = box.y + H / 2;
+
+    // Font size: 10% of shorter side — large enough to span diagonally but not crop
+    const fontSize = Math.min(W, H) * 0.12;
     const textW    = font.widthOfTextAtSize('UNVERIFIED', fontSize);
+    const angle    = 45 * Math.PI / 180;
+
+    // Offset x,y so text centre lands at page centre after 45° rotation
+    const x = cx - (textW / 2) * Math.cos(angle) + (fontSize / 2) * Math.sin(angle);
+    const y = cy - (textW / 2) * Math.sin(angle) - (fontSize / 2) * Math.cos(angle);
 
     page.drawText('UNVERIFIED', {
-      x:       cx - textW / 2,
-      y:       cy - fontSize / 2,
+      x, y,
       size:    fontSize,
       font,
       color:   rgb(0.75, 0.75, 0.75),
@@ -458,6 +465,31 @@ async function stampWatermark(pdfBytes) {
 
   return Buffer.from(await pdf.save());
 }
+
+// async function stampWatermark(pdfBytes) {
+//   const pdf  = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+//   const font = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+//   pdf.getPages().forEach(page => {
+//     const box      = getVisibleBox(page);
+//     const cx       = box.x + box.width  / 2;
+//     const cy       = box.y + box.height / 2;
+//     const fontSize = Math.min(box.width, box.height) * 0.15;
+//     const textW    = font.widthOfTextAtSize('UNVERIFIED', fontSize);
+
+//     page.drawText('UNVERIFIED', {
+//       x:       cx - textW / 2,
+//       y:       cy - fontSize / 2,
+//       size:    fontSize,
+//       font,
+//       color:   rgb(0.75, 0.75, 0.75),
+//       opacity: 0.15,
+//       rotate:  degrees(45),
+//     });
+//   });
+
+//   return Buffer.from(await pdf.save());
+// }
 
 // ── Main ──────────────────────────────────────────────────────
 async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
