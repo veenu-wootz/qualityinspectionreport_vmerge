@@ -433,6 +433,32 @@ async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
   return Buffer.from(await doc.save());
 }
 
+// ── Watermark stamp ───────────────────────────────────────────
+async function stampWatermark(pdfBytes) {
+  const pdf  = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const font = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  pdf.getPages().forEach(page => {
+    const box      = getVisibleBox(page);
+    const cx       = box.x + box.width  / 2;
+    const cy       = box.y + box.height / 2;
+    const fontSize = Math.min(box.width, box.height) * 0.15;
+    const textW    = font.widthOfTextAtSize('UNVERIFIED', fontSize);
+
+    page.drawText('UNVERIFIED', {
+      x:       cx - textW / 2,
+      y:       cy - fontSize / 2,
+      size:    fontSize,
+      font,
+      color:   rgb(0.75, 0.75, 0.75),
+      opacity: 0.15,
+      rotate:  degrees(45),
+    });
+  });
+
+  return Buffer.from(await pdf.save());
+}
+
 // ── Main ──────────────────────────────────────────────────────
 async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
   await ensureLogo();
@@ -579,9 +605,14 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
     pgs.forEach(p => merged.addPage(p));
     console.log(`    "${cert.label}" p.${cert.startPage}–${cert.startPage + cert.pageCount - 1}`);
   }
-
+  
   console.log(`  Final: ${merged.getPageCount()} pages`);
-  return Buffer.from(await merged.save());
+  const finalBytes = Buffer.from(await merged.save());
+  if (!meta.verifiedBy || meta.verifiedBy === 'Unverified') {
+    console.log('  Stamping UNVERIFIED watermark...');
+    return await stampWatermark(finalBytes);
+  }
+  return finalBytes;
 }
 
 module.exports = { buildMergedPDF };
