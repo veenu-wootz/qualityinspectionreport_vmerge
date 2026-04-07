@@ -192,6 +192,7 @@ app.post('/generate', async (req, res) => {
       hasDrawing:     !!data.part_drawing,
       hasDim:         data.dimRows.length  > 0,
       hasVis:         data.visRows.length  > 0,
+      verifiedBy:     data.verified_by,
     });
     console.log(`  Merged: ${(mergedBuffer.length / 1024).toFixed(0)} KB`);
 
