@@ -1,16 +1,28 @@
 /**
- * server.js — QIR Merge Server
- * Self-contained. No external local files needed.
+ * server.js — QIR Server (AppSheet edition)
  *
- * Endpoints:
- *   GET  /          health check
- *   POST /merge     merge QIR + certs, return final PDF
+ * POST /generate   Receives AppSheet webhook → generates QIR PDF
+ *                  → merges test cert PDFs → emails result
+ *
+ * AppSheet sends:
+ * {
+ *   Sample: { sample_id, title, part_number, part_name, created_at,
+ *             created_by, customer_name, inspection_map },
+ *   Related_Inspection: [
+ *     { inspection_type, parameter, min_req, max_req, instrument,
+ *       sample_1..sample_10, status, qc_photo, comment, test_doc }
+ *   ],
+ *   exported_by: "user@email.com",
+ *   bcc_email:   "a@b.com, c@d.com"
+ * }
  */
 
-const express            = require('express');
-const fetch              = require('node-fetch');
-const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
-const { sendQIREmail }   = require('./sendEmail');
+require('dotenv').config();
+
+const express          = require('express');
+const { generateQIR }  = require('./generateQIR');
+const { buildMergedPDF } = require('./mergePDFs');
+const { sendQIREmail } = require('./sendEmail');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -25,286 +37,182 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '50mb' }));
 
-app.use((req, res, next) => { if (req.method === 'POST') console.log('RAW PAYLOAD:', JSON.stringify(req.body, null, 2)); next(); });
-
-app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'QIR Merge Server', version: '1.0.0' });
+// Log every POST for debugging
+app.use((req, res, next) => {
+  if (req.method === 'POST') {
+    console.log('\nRAW PAYLOAD:', JSON.stringify(req.body, null, 2));
+  }
+  next();
 });
 
-async function loadPDFFromSource(src) {
-  if (src.type === 'url') {
-    console.log(`  Fetching: ${src.value.substring(0, 70)}...`);
-    const res = await fetch(src.value, { timeout: 30000 });
-    if (!res.ok) throw new Error(`HTTP ${res.status} fetching PDF`);
-    return Buffer.from(await res.arrayBuffer());
+app.get('/', (req, res) => {
+  res.json({ status: 'ok', service: 'QIR Generator (AppSheet)', version: '2.0.0' });
+});
+
+// ── AppSheet URL builder ──────────────────────────────────────
+// AppSheet stores file paths, not full URLs.
+// We reconstruct the URL using the pattern AppSheet documents.
+const APPSHEET_APP   = process.env.APPSHEET_APP_NAME || 'WootzCheckin2Ayush-832304561';
+const APPSHEET_TABLE = 'Inspection';
+
+function appsheetFileUrl(fileName) {
+  if (!fileName || !fileName.trim()) return null;
+  // If already a full URL, return as-is
+  if (fileName.startsWith('http')) return fileName;
+  return `https://www.appsheet.com/template/gettablefileurl?appName=${APPSHEET_APP}&tableName=${APPSHEET_TABLE}&fileName=${encodeURIComponent(fileName)}`;
+}
+
+// ── Parse AppSheet payload → internal format ──────────────────
+function parsePayload(body) {
+  const sample = body.Sample || {};
+  const rows   = body.Related_Inspection || [];
+
+  const dimRows  = [];
+  const visRows  = [];
+  const certDocs = [];  // { label, url }
+
+  let dimIdx = 1, visIdx = 1;
+
+  for (const row of rows) {
+    const type = (row.inspection_type || '').toLowerCase().trim();
+
+    if (type === 'dimension' || type === 'dimensional') {
+      // Build samples array — only include non-empty values
+      const samples = [];
+      for (let i = 1; i <= 10; i++) {
+        const v = row[`sample_${i}`];
+        if (v !== undefined) samples.push(v ?? '');
+      }
+      // Trim trailing empty samples but keep at least 1
+      while (samples.length > 1 && samples[samples.length - 1] === '') samples.pop();
+
+      dimRows.push({
+        index:      dimIdx++,
+        parameter:  row.parameter   || '',
+        specificat: `${row.min_req || ''}${row.min_req && row.max_req ? ' – ' : ''}${row.max_req || ''}`,
+        instrument: row.instrument  || '',
+        min:        row.min_req     || '',
+        max:        row.max_req     || '',        
+        samples,
+        status_1:   row.status      || '',
+        qc_photo:   appsheetFileUrl(row.qc_photo),
+        comment:    row.comment     || '',
+      });
+
+    } else if (type === 'visual') {
+      visRows.push({
+        index:     visIdx++,
+        parameter: row.parameter || '',
+        status:    row.status    || '',
+        comments:  row.comment   || '',
+        photo:     appsheetFileUrl(row.qc_photo),
+      });
+
+    } else if (type === 'test' || type === 'certificate' || type === 'pdf') {
+      const docUrl = appsheetFileUrl(row.test_doc);
+      if (docUrl) {
+        certDocs.push({
+          label: row.parameter || 'Certificate',
+          url:   docUrl,
+        });
+      }
+    }
   }
-  return Buffer.from(src.value, 'base64');
+
+  // Determine sample count from longest dim row
+  const sampleCount = dimRows.reduce((max, r) => Math.max(max, r.samples.length), 5);
+
+  return {
+    // Header fields
+    report_no:       sample.sample_id    || `QIR-${Date.now()}`,
+    submission_date: sample.created_at   || new Date().toISOString().split('T')[0],
+    part_name:       sample.part_name    || '',
+    part_number:     sample.part_number  || '',
+    customer:        sample.customer_name|| '',
+    created_by:      sample.created_by   || '',
+    title:           sample.title        || '',
+    rm_grade:        sample.rm_grade     || '',
+    item_code:       sample.item_code    || '',
+    heat_no:         sample.heat_no      || '',
+    order_qty:       sample.qty          || '',
+    samples_checked: sample.samples_checked || '',
+    verified_by:     sample.verified_by  || 'Unverified',
+    remarks:         sample.remark       || '',
+    conclusion:      '',
+    
+    // Drawing / images
+    part_drawing:    appsheetFileUrl(sample.inspection_map),
+    insp_image:      null,
+
+    // Inspection data
+    sampleCount,
+    dimRows,
+    visRows,
+
+    // Email
+    your_email:      body.exported_by || '',
+    bcc_email:       body.bcc_email   || '',
+
+    // Cert PDFs — passed separately to buildMergedPDF
+    certificates: certDocs,
+  };
 }
 
-// ── INDEX PAGE — clean black/grey table style ─────────────────
-async function buildIndexPage({ reportNo, partName, date, inspectionPage, certEntries }) {
-  const doc  = await PDFDocument.create();
-  const W = 841.89, H = 595.28;
-  const page = doc.addPage([W, H]);
-
-  const fontBold   = await doc.embedFont(StandardFonts.HelveticaBold);
-  const fontNormal = await doc.embedFont(StandardFonts.Helvetica);
-
-  const BLACK  = rgb(0.10, 0.10, 0.10);
-  const DGRAY  = rgb(0.30, 0.30, 0.30);
-  const MGRAY  = rgb(0.55, 0.55, 0.55);
-  const LGRAY  = rgb(0.82, 0.82, 0.82);
-  const OFFWHT = rgb(0.95, 0.95, 0.95);
-  const HDRBG  = rgb(0.88, 0.88, 0.88);
-  const WHITE  = rgb(1.00, 1.00, 1.00);
-
-  page.drawRectangle({ x:0, y:0, width:W, height:H, color:WHITE });
-
-  // Title
-  const tocLabel = 'TABLE OF CONTENTS';
-  const tocW = fontBold.widthOfTextAtSize(tocLabel, 11);
-  page.drawText(tocLabel, {
-    x: W/2 - tocW/2, y: H-52, size:11, font:fontBold, color:BLACK,
-  });
-
-  // Table layout
-  const TBL_X  = 40;
-  const TBL_W  = W - 80;
-  const PAD    = 10;
-  const ROW_H  = 24;
-  let   rowY   = H - 72;
-  const tableTopY = rowY;
-
-  function drawRow(label, pageNum, isSub=false, isHeader=false) {
-    const bg = isHeader ? HDRBG : (isSub ? WHITE : OFFWHT);
-    page.drawRectangle({ x:TBL_X, y:rowY-ROW_H, width:TBL_W, height:ROW_H, color:bg });
-    page.drawLine({ start:{x:TBL_X,y:rowY-ROW_H}, end:{x:TBL_X+TBL_W,y:rowY-ROW_H}, thickness:0.3, color:LGRAY });
-
-    const indent   = isSub ? 18 : 0;
-    const fontSize = isHeader ? 8.5 : 8;
-    const font     = isHeader ? fontBold : fontNormal;
-    const color    = isHeader ? BLACK : isSub ? MGRAY : DGRAY;
-    const textY    = rowY - ROW_H + (ROW_H - fontSize) / 2 + 1;
-
-    page.drawText(String(label), { x:TBL_X+PAD+indent, y:textY, size:fontSize, font, color });
-
-    const pgStr = String(pageNum);
-    const pgW   = (isHeader ? fontBold : fontNormal).widthOfTextAtSize(pgStr, fontSize);
-    page.drawText(pgStr, { x:TBL_X+TBL_W-PAD-pgW, y:textY, size:fontSize, font: isHeader ? fontBold : fontNormal, color: isHeader ? BLACK : DGRAY });
-
-    rowY -= ROW_H;
-  }
-
-  // Top border
-  page.drawLine({ start:{x:TBL_X,y:tableTopY}, end:{x:TBL_X+TBL_W,y:tableTopY}, thickness:0.6, color:DGRAY });
-
-  drawRow('Section', 'Page', false, true);
-  drawRow('Report Header & Part Information', 1);
-  drawRow('Index', 2);
-  drawRow('Part Drawing', 3);
-  drawRow('Inspection', inspectionPage);
-  drawRow('Dimensional Inspection', inspectionPage, true);
-  drawRow('Visual Inspection', '—', true);
-  drawRow('Tests & Certificates', certEntries[0]?.startPage || '—');
-  for (const c of certEntries) drawRow(c.label, c.startPage, true);
-
-  // Bottom + side borders
-  page.drawLine({ start:{x:TBL_X,y:rowY}, end:{x:TBL_X+TBL_W,y:rowY}, thickness:0.6, color:DGRAY });
-  page.drawLine({ start:{x:TBL_X,y:tableTopY}, end:{x:TBL_X,y:rowY}, thickness:0.6, color:DGRAY });
-  page.drawLine({ start:{x:TBL_X+TBL_W,y:tableTopY}, end:{x:TBL_X+TBL_W,y:rowY}, thickness:0.6, color:DGRAY });
-
-  // Page number
-  const p2W = fontNormal.widthOfTextAtSize('2', 8);
-  page.drawText('2', { x:W/2-p2W/2, y:20, size:8, font:fontNormal, color:MGRAY });
-
-  return Buffer.from(await doc.save());
-}
-
-// ── HEADING STAMP — text only, no bar, no red line ───────────
-async function stampHeading(pdfBytes, label) {
-  if (!label?.trim()) return pdfBytes;
-  try {
-    const pdf  = await PDFDocument.load(pdfBytes, { ignoreEncryption:true });
-    const page = pdf.getPages()[0];
-    const font = await pdf.embedFont(StandardFonts.HelveticaBold);
-    const { width, height } = page.getSize();
-
-    // Normalize font size to appear same across different page sizes
-    const fontSize = Math.round((width / 841) * 11 * 10) / 10;
-
-    // Semi-transparent white strip so text is readable over any background
-    page.drawRectangle({
-      x:0, y:height - fontSize*2.8,
-      width, height: fontSize*2.8,
-      color: rgb(1,1,1), opacity: 0.75,
-    });
-
-    // Label text — dark, centred, no line, no colour
-    const textW = font.widthOfTextAtSize(label, fontSize);
-    page.drawText(label, {
-      x: (width - textW) / 2,
-      y: height - fontSize*2.0,
-      size: fontSize, font,
-      color: rgb(0.10, 0.10, 0.10),
-    });
-
-    return Buffer.from(await pdf.save());
-  } catch(e) { return pdfBytes; }
-}
-
-// ── PAGE NUMBER STAMP ─────────────────────────────────────────
-// Normalized font size so numbers appear same physical size on any page size
-async function stampPageNumbers(pdfBytes, startPageNum) {
-  const pdf  = await PDFDocument.load(pdfBytes, { ignoreEncryption:true });
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
-
-  pdf.getPages().forEach((page, i) => {
-    const { width } = page.getSize();
-    const fontSize = Math.round((width / 841) * 8 * 10) / 10;
-    const barH     = fontSize * 2.6;
-
-    page.drawRectangle({ x:0, y:0, width, height:barH, color:rgb(0.96,0.96,0.96), opacity:0.9 });
-
-    const pgStr = String(startPageNum + i);
-    const pgW   = font.widthOfTextAtSize(pgStr, fontSize);
-    page.drawText(pgStr, { x:width/2-pgW/2, y:barH*0.25, size:fontSize, font, color:rgb(0.20,0.20,0.20) });
-  });
-
-  return Buffer.from(await pdf.save());
-}
-
-// ── Stamp page numbers directly onto an already-loaded PDFDocument ──
-async function stampPageNumbersOnDoc(pdfDoc, pageIndexOffset, startPageNum) {
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const pages = pdfDoc.getPages();
-
-  for (let i = pageIndexOffset; i < pages.length; i++) {
-    const page = pages[i];
-    const { width } = page.getSize();
-    const fontSize = Math.round((width / 841) * 8 * 10) / 10;
-    const barH = fontSize * 2.6;
-    const finalPageNum = startPageNum + (i - pageIndexOffset);
-
-    page.drawRectangle({ x:0, y:0, width, height:barH, color:rgb(0.96,0.96,0.96), opacity:0.9 });
-    const pgStr = String(finalPageNum);
-    const pgW   = font.widthOfTextAtSize(pgStr, fontSize);
-    page.drawText(pgStr, { x:width/2-pgW/2, y:barH*0.25, size:fontSize, font, color:rgb(0.20,0.20,0.20) });
-  }
-}
-
-// ── POST /merge ───────────────────────────────────────────────
-app.post('/merge', async (req, res) => {
-  const { reportNo='QIR', partName='', date='', yourEmail='', qirSource, certificates=[] } = req.body;
-  console.log(`\n── /merge: ${reportNo} — ${certificates.length} cert(s)`);
+// ── Main endpoint ─────────────────────────────────────────────
+app.post('/generate', async (req, res) => {
+  const startTime = Date.now();
 
   try {
-    // 1. Load QIR
-    console.log('[1] Loading QIR...');
-    const qirBytes     = await loadPDFFromSource(qirSource);
-    const qirPdf       = await PDFDocument.load(qirBytes, { ignoreEncryption:true });
-    const qirPageCount = qirPdf.getPageCount();
-    console.log(`    ${qirPageCount} pages`);
+    // ── RAW payload from AppSheet ──
+    console.log('\n━━━━━━━━━━━━ RAW PAYLOAD ━━━━━━━━━━━━');
+    console.log(JSON.stringify(req.body, null, 2));
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-    // 2. Load certs
-    console.log('[2] Loading certificates...');
-    const certData = [];
-    for (const cert of certificates) {
-      if (!cert.value?.trim()) continue;
-      try {
-        const bytes = await loadPDFFromSource(cert);
-        const pdf   = await PDFDocument.load(bytes, { ignoreEncryption:true });
-        certData.push({ label: cert.label || 'Certificate', bytes, pageCount: pdf.getPageCount() });
-        console.log(`    "${cert.label}" — ${pdf.getPageCount()} page(s)`);
-      } catch(e) { console.warn(`    Skipped "${cert.label}": ${e.message}`); }
-    }
+    const data = parsePayload(req.body);
 
-    // 3. Calculate page numbers
-    // Final structure:
-    //   p.1            QIR page 1 (header)
-    //   p.2            Index (inserted)
-    //   p.3            QIR page 2 (part drawing)
-    //   p.4 .. p.N+1   QIR pages 3..N (inspection etc.)
-    //   p.N+2 onwards  Certificates
-    const INSPECTION_PAGE = 4;
-    const certStartPage   = qirPageCount + 2;
-    let   runningPage     = certStartPage;
-    const certEntries = certData.map(c => {
-      const entry = { ...c, startPage: runningPage };
-      runningPage += c.pageCount;
-      return entry;
+    // ── Parsed result ──
+    console.log('━━━━━━━━━━━━ PARSED DATA ━━━━━━━━━━━━');
+    console.log(`  report_no:       ${data.report_no}`);
+
+    const filename = `Inspection Report-${data.title}-${Date.now()}.pdf`
+      .replace(/[^a-zA-Z0-9\-_.]/g, '_');
+
+    // 1. Generate QIR PDF (HTML → jsPDF)
+    console.log('\n[1/3] Generating QIR PDF...');
+    const qirBuffer = await generateQIR(data);
+    console.log(`  ${(qirBuffer.length / 1024).toFixed(0)} KB`);
+
+    // 2. Merge certificates
+    console.log('\n[2/3] Merging certificates...');
+    const mergedBuffer = await buildMergedPDF(qirBuffer, data.certificates, {
+      reportNo:       data.report_no,
+      partName:       data.part_name,
+      date:           data.submission_date,
+      partDrawingUrl: data.part_drawing,        // full URL — mergePDFs fetches & inserts p.1
+      hasDrawing:     !!data.part_drawing,
+      hasDim:         data.dimRows.length  > 0,
+      hasVis:         data.visRows.length  > 0,
     });
-    console.log(`[3] inspection=p.${INSPECTION_PAGE}, certs=p.${certStartPage}`);
+    console.log(`  Merged: ${(mergedBuffer.length / 1024).toFixed(0)} KB`);
 
-    // 4. Build index
-    console.log('[4] Building index...');
-    const indexBytes = await buildIndexPage({ reportNo, partName, date, inspectionPage: INSPECTION_PAGE, certEntries });
+    // 3. Send email
+    console.log('\n[3/3] Sending email...');
+    await sendQIREmail(data, mergedBuffer, filename);
 
-    // 5. Stamp QIR page numbers
-    // QIR p.1 → final p.1,  QIR p.2 → final p.3,  QIR p.3 → final p.4, etc.
-    console.log('[5] Numbering QIR pages...');
-    const qirForStamp = await PDFDocument.load(qirBytes, { ignoreEncryption:true });
-    const qirFont     = await qirForStamp.embedFont(StandardFonts.Helvetica);
-    qirForStamp.getPages().forEach((page, i) => {
-      const finalNum = i === 0 ? 1 : i + 2;  // page 1 stays 1; others shift +1 for index
-      const { width } = page.getSize();
-      const fontSize = Math.round((width / 841) * 8 * 10) / 10;
-      const barH = fontSize * 2.6;
-      page.drawRectangle({ x:0, y:0, width, height:barH, color:rgb(0.96,0.96,0.96), opacity:0.9 });
-      const pgStr = String(finalNum);
-      const pgW   = qirFont.widthOfTextAtSize(pgStr, fontSize);
-      page.drawText(pgStr, { x:width/2-pgW/2, y:barH*0.25, size:fontSize, font:qirFont, color:rgb(0.20,0.20,0.20) });
-    });
-    const qirNumbered = Buffer.from(await qirForStamp.save());
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`\n✓ Done in ${elapsed}s — ${filename}\n`);
 
-    // 6. Merge
-    console.log('[6] Merging...');
-    const merged  = await PDFDocument.create();
-    const qirFinal = await PDFDocument.load(qirNumbered, { ignoreEncryption:true });
-    const qirPages = await merged.copyPages(qirFinal, qirFinal.getPageIndices());
+    res.json({ success: true, filename, elapsed: `${elapsed}s`, certs: data.certificates.length });
 
-    merged.addPage(qirPages[0]);                                              // p.1 header
-    const idxPdf = await PDFDocument.load(indexBytes);
-    const [idxPg] = await merged.copyPages(idxPdf, [0]);
-    merged.addPage(idxPg);                                                    // p.2 index
-    for (let i = 1; i < qirPages.length; i++) merged.addPage(qirPages[i]);   // p.3+ QIR
-
-    for (const cert of certEntries) {
-      let   numbered = await stampHeading(cert.bytes, cert.label);
-      numbered = await stampPageNumbers(numbered, cert.startPage);
-      const cp  = await PDFDocument.load(numbered, { ignoreEncryption:true });
-      const pgs = await merged.copyPages(cp, cp.getPageIndices());
-      pgs.forEach(p => merged.addPage(p));
-      console.log(`    "${cert.label}" p.${cert.startPage}–${cert.startPage+cert.pageCount-1}`);
-    }
-
-    const finalBytes = await merged.save();
-    const filename   = `QIR-${reportNo}-${date}.pdf`.replace(/[^a-zA-Z0-9\-_.]/g, '_');
-    console.log(`✓ ${merged.getPageCount()} pages, ${(finalBytes.length/1024).toFixed(0)} KB\n`);
-
-    // 7. Send email
-    console.log('[7] Sending email...');
-    try {
-      await sendQIREmail({ reportNo, partName, date, yourEmail }, Buffer.from(finalBytes), filename);
-    } catch(emailErr) {
-      // Don't fail the whole request if email fails — PDF is still returned
-      console.error('  Email failed:', emailErr.message);
-    }
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(Buffer.from(finalBytes));
-
-  } catch(err) {
-    console.error('✗ Error:', err.message);
+  } catch (err) {
+    console.error('✗ Error:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`\nQIR Merge Server on port ${PORT}`);
-  console.log(`Health: GET  /`);
-  console.log(`Merge:  POST /merge\n`);
-  if (!process.env.SMTP_USER)        console.warn('⚠  SMTP_USER not set');
-  if (!process.env.SMTP_PASSWORD)    console.warn('⚠  SMTP_PASSWORD not set');
-  if (!process.env.INTERNAL_EMAILS)  console.warn('⚠  INTERNAL_EMAILS not set');
+  console.log(`\nQIR Server (AppSheet) on port ${PORT}\n`);
+  if (!process.env.SMTP_USER)       console.warn('⚠  SMTP_USER not set');
+  if (!process.env.SMTP_PASSWORD)   console.warn('⚠  SMTP_PASSWORD not set');
+  if (!process.env.APPSHEET_APP_NAME) console.warn('⚠  APPSHEET_APP_NAME not set (using default)');
 });
