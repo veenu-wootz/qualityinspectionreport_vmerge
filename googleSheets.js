@@ -64,14 +64,14 @@ async function appendToSheet(data, driveUrl) {
   // Empty strings for unused columns to preserve alignment
   const row = [
     data.report_no        || '',  // A  — CheckIn ID
-    data.report_no        || '',  // B  — ID
+    data.id               || '',  // B  — ID
     '',                           // C  — (unused)
     '',                           // D  — (unused)
     '',                           // E  — Project name (later)
     data.part_number      || '',  // F  — Part number
     data.part_drawing     || '',  // G  — Assembly drawing
     'Update',                     // H  — Status
-    data.remarks          || '',  // I  — Description
+    'Please find the attached inspection report'          || '',  // I  — Description
     data.insp_image       || '',  // J  — Inspection Image
     '',                           // K  — (unused)
     data.created_by       || '',  // L  — Created by
@@ -86,7 +86,7 @@ async function appendToSheet(data, driveUrl) {
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
-    range:         'Checkin!A:AA',   // targets the Checkin subsheet
+    range:         'CheckIn!A:AA',   // targets the Checkin subsheet
     valueInputOption: 'USER_ENTERED', // preserves URLs as clickable links
     insertDataOption: 'INSERT_ROWS',  // always adds a new row, never overwrites
     requestBody: {
