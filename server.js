@@ -128,6 +128,7 @@ function parsePayload(body) {
     // Header fields
     report_no:       sample.sample_id    || `QIR-${Date.now()}`,
     submission_date: sample.created_at   || new Date().toISOString().split('T')[0],
+    id:              sample.id           || '',
     part_name:       sample.part_name    || '',
     part_number:     sample.part_number  || '',
     customer:        sample.customer_name|| '',
