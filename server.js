@@ -23,6 +23,8 @@ const express          = require('express');
 const { generateQIR }  = require('./generateQIR');
 const { buildMergedPDF } = require('./mergePDFs');
 const { sendQIREmail } = require('./sendEmail');
+const { uploadToDrive }    = require('./googleDrive');
+const { appendToSheet }    = require('./googleSheets');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -137,6 +139,7 @@ function parsePayload(body) {
     order_qty:       sample.qty          || '',
     samples_checked: sample.samples_checked || '',
     verified_by:     sample.verified_by  || 'Unverified',
+    add_to_checkin:  sample.add_to_checkin === true || sample.add_to_checkin === 'true',
     remarks:         sample.remark       || '',
     conclusion:      '',
     
@@ -196,7 +199,22 @@ app.post('/generate', async (req, res) => {
     });
     console.log(`  Merged: ${(mergedBuffer.length / 1024).toFixed(0)} KB`);
 
-    // 3. Send email
+    // 3. If verified — upload to Drive and append to Sheet
+    let driveUrl = null;
+    if (data.verified_by && data.verified_by !== 'Unverified' && data.add_to_checkin) {
+      try {
+        console.log('\n[3/5] Uploading to Google Drive...');
+        driveUrl = await uploadToDrive(mergedBuffer, filename);
+ 
+        console.log('\n[4/5] Appending to Google Sheet...');
+        await appendToSheet(data, driveUrl);
+      } catch (uploadErr) {
+        // Non-fatal — log and continue to email
+        console.error('  Drive/Sheet error (non-fatal):', uploadErr.message);
+      }
+    }
+    
+    // 4. Send email
     console.log('\n[3/3] Sending email...');
     await sendQIREmail(data, mergedBuffer, filename);
 
