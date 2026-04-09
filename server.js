@@ -23,7 +23,7 @@ const express          = require('express');
 const { generateQIR }  = require('./generateQIR');
 const { buildMergedPDF } = require('./mergePDFs');
 const { sendQIREmail } = require('./sendEmail');
-const { uploadToDrive }    = require('./googleDrive');
+const { uploadToS3 } = require('./awsUpload');
 const { appendToSheet }    = require('./googleSheets');
 
 const app  = express();
@@ -205,7 +205,7 @@ app.post('/generate', async (req, res) => {
     if (data.verified_by && data.verified_by !== 'Unverified' && data.add_to_checkin) {
       try {
         console.log('\n[3/5] Uploading to Google Drive...');
-        driveUrl = await uploadToDrive(mergedBuffer, filename);
+        driveUrl = await uploadToS3(mergedBuffer, filename);
  
         console.log('\n[4/5] Appending to Google Sheet...');
         await appendToSheet(data, driveUrl);
