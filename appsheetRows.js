@@ -26,6 +26,10 @@ async function addCheckinRow(data, s3Url) {
 
   const url = `https://api.appsheet.com/api/v2/apps/${appId}/tables/${TABLE_NAME}/Action`;
 
+  // Timestamp in MM/DD/YYYY HH:MM:SS format
+  const now = new Date();
+  const today = `${now.getMonth()+1}/${now.getDate()}/${now.getFullYear()}`;
+
   const body = {
     Action: 'Add',
     Properties: {
@@ -43,6 +47,7 @@ async function addCheckinRow(data, s3Url) {
         'Created by':        data.created_by      || '',
         'Timestamp':         data.timestamp,
         'Files':             s3Url                || '',
+        'Reminder_custom_date': today,
       },
     ],
   };
