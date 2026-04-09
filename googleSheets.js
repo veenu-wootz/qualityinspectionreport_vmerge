@@ -86,7 +86,7 @@ async function appendToSheet(data, driveUrl) {
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
-    range:         'CheckIn!A:AA',   // targets the Checkin subsheet
+    range: 'Checkin!A1',   // targets the Checkin subsheet
     valueInputOption: 'USER_ENTERED', // preserves URLs as clickable links
     insertDataOption: 'INSERT_ROWS',  // always adds a new row, never overwrites
     requestBody: {
