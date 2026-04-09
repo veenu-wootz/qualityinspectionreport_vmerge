@@ -133,6 +133,7 @@ function parsePayload(body) {
     part_number:     sample.part_number  || '',
     customer:        sample.customer_name|| '',
     created_by:      sample.created_by   || '',
+    created_by_email: sample.created_by_email || '',
     title:           sample.title        || '',
     rm_grade:        sample.rm_grade     || '',
     item_code:       sample.item_code    || '',
@@ -142,6 +143,7 @@ function parsePayload(body) {
     verified_by:     sample.verified_by  || 'Unverified',
     add_to_checkin:  sample.add_to_checkin === true || sample.add_to_checkin === 'true',
     remarks:         sample.remark       || '',
+    timestamp:       sample.timestamp    || '',
     conclusion:      '',
     
     // Drawing / images
@@ -178,8 +180,9 @@ app.post('/generate', async (req, res) => {
     console.log('━━━━━━━━━━━━ PARSED DATA ━━━━━━━━━━━━');
     console.log(`  report_no:       ${data.report_no}`);
 
-    const filename = `Inspection Report-${data.title}-${Date.now()}.pdf`
-      .replace(/[^a-zA-Z0-9\-_.]/g, '_');
+    const filename = `Inspection Report-${data.title}-${data.timestamp}.pdf`;
+
+    const s3FileUrlName = `${data.report_no}-${data.timestamp}.pdf`.replace(/[^a-zA-Z0-9\-_.]/g, '_');
 
     // 1. Generate QIR PDF (HTML → jsPDF)
     console.log('\n[1/3] Generating QIR PDF...');
@@ -205,7 +208,7 @@ app.post('/generate', async (req, res) => {
     if (data.verified_by && data.verified_by !== 'Unverified' && data.add_to_checkin) {
       try {
         console.log('\n[3/5] Uploading to Google Drive...');
-        driveUrl = await uploadToS3(mergedBuffer, filename);
+        driveUrl = await uploadToS3(mergedBuffer, s3FileUrlName);
  
         console.log('\n[4/5] Appending to Google Sheet...');
         await appendToSheet(data, driveUrl);
