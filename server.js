@@ -24,7 +24,7 @@ const { generateQIR }  = require('./generateQIR');
 const { buildMergedPDF } = require('./mergePDFs');
 const { sendQIREmail } = require('./sendEmail');
 const { uploadToS3 } = require('./awsUpload');
-const { appendToSheet }    = require('./googleSheets');
+const { addCheckinRow } = require('./appsheetRows');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -211,7 +211,7 @@ app.post('/generate', async (req, res) => {
         driveUrl = await uploadToS3(mergedBuffer, s3FileUrlName);
  
         console.log('\n[4/5] Appending to Google Sheet...');
-        await appendToSheet(data, driveUrl);
+        await addCheckinRow(data, driveUrl);
       } catch (uploadErr) {
         // Non-fatal — log and continue to email
         console.error('  Drive/Sheet error (non-fatal):', uploadErr.message);
