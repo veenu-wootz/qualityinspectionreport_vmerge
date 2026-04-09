@@ -74,8 +74,8 @@ async function appendToSheet(data, driveUrl) {
     'Please find the attached inspection report'          || '',  // I  — Description
     data.insp_image       || '',  // J  — Inspection Image
     '',                           // K  — (unused)
-    data.created_by       || '',  // L  — Created by
-    timestamp,                    // M  — Timestamp
+    data.created_by_email || '',  // L  — Created by
+    data.timestamp,                    // M  — Timestamp
     '', '', '', '', '',           // N, O, P, Q, R
     '', '', '', '', '',           // S, T, U, V, W
     '', '', '',                   // X, Y, Z
