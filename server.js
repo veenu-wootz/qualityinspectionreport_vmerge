@@ -110,7 +110,7 @@ function parsePayload(body) {
         photo:     appsheetFileUrl(row.qc_photo),
       });
 
-    } else if (type === 'test' || type === 'certificate' || type === 'pdf') {
+    } else if (type === 'test' || type === 'certificate' || type === 'report' || type === 'attachment' ) {
       const docUrl = appsheetFileUrl(row.test_doc);
       if (docUrl) {
         certDocs.push({
@@ -131,6 +131,7 @@ function parsePayload(body) {
     id:              sample.id           || '',
     part_name:       sample.part_name    || '',
     part_number:     sample.part_number  || '',
+    project_pocs:    sample.project_pocs || '',
     customer:        sample.customer_name|| '',
     created_by:      sample.created_by   || '',
     created_by_email: sample.created_by_email || '',
@@ -207,14 +208,14 @@ app.post('/generate', async (req, res) => {
     let driveUrl = null;
     if (data.verified_by && data.verified_by !== 'Unverified' && data.add_to_checkin) {
       try {
-        console.log('\n[3/5] Uploading to Google Drive...');
+        console.log('\n[3/5] Uploading to AWS_s3...');
         driveUrl = await uploadToS3(mergedBuffer, s3FileUrlName);
  
-        console.log('\n[4/5] Appending to Google Sheet...');
+        console.log('\n[4/5] Appending to Appsheet...');
         await addCheckinRow(data, driveUrl);
       } catch (uploadErr) {
         // Non-fatal — log and continue to email
-        console.error('  Drive/Sheet error (non-fatal):', uploadErr.message);
+        console.error('  Appsheet error (non-fatal):', uploadErr.message);
       }
     }
     
