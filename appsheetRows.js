@@ -41,12 +41,12 @@ async function addCheckinRow(data, s3Url) {
     Rows: [
       {
         'CheckIn ID':        data.report_no       || '',
-        'ID':                data.report_no       || '',
+        'ID':                data.id              || '',
         'Part number':       data.part_number     || '',
         'Assembly drawing':  data.part_drawing    || '',
         'Status':            'Update',
-        'Description':       data.remarks         || '',
-        'Created by':        data.created_by      || '',
+        'Description':       'Please find the attached inspection report.',
+        'Created by':        data.created_by_email     || '',
         'Timestamp':         data.timestamp,
         'Files':             s3Url                || '',
         'Reminder_custom_date': tomorrow_date,
