@@ -50,6 +50,7 @@ async function addCheckinRow(data, s3Url) {
         'Timestamp':         data.timestamp,
         'Files':             s3Url                || '',
         'Reminder_custom_date': tomorrow_date,
+        'Mention':           data.project_pocs
       },
     ],
   };
