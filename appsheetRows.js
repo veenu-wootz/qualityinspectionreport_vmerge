@@ -10,7 +10,7 @@
 
 const fetch = require('node-fetch');
 
-const TABLE_NAME = 'CheckIn';
+const TABLE_NAME = 'Samples';
 
 /**
  * Add one row to the CheckIn table via AppSheet API.
@@ -26,35 +26,21 @@ async function addCheckinRow(data, s3Url) {
 
   const url = `https://api.appsheet.com/api/v2/apps/${appId}/tables/${TABLE_NAME}/Action`;
 
-  // Timestamp in MM/DD/YYYY HH:MM:SS format
-  const now      = new Date();
-  const tomorrow = new Date(now);
-  tomorrow.setDate(now.getDate() + 1);
-  const tomorrow_date = `${tomorrow.getMonth()+1}/${tomorrow.getDate()}/${tomorrow.getFullYear()}`;
-
   const body = {
-    Action: 'Add',
+    Action: 'Edit',
     Properties: {
       Locale:   'en-US',
       Timezone: 'Asia/Kolkata',
     },
     Rows: [
       {
-        'CheckIn ID':        data.report_no       || '',
-        'ID':                data.id              || '',
-        'Part number':       data.part_number     || '',
-        'Assembly drawing':  data.part_drawing    || '',
-        'Status':            'Update',
-        'Description':       'Please find the attached inspection report.',
-        'Created by':        data.created_by_email     || '',
-        'Timestamp':         data.timestamp,
-        'Files':             s3Url                || '',
-        'Reminder_custom_date': tomorrow_date,
+        'Sample_ID': data.report_no || '',  // key field — identifies the row
+        'Report link':     s3Url          || '',  // fields to update
       },
     ],
   };
 
-  console.log(`  Adding row to AppSheet table '${TABLE_NAME}' for report: ${data.report_no}`);
+  console.log(`  Editing row of AppSheet table '${TABLE_NAME}' for report: ${data.report_no}`);
 
   const res = await fetch(url, {
     method:  'POST',
@@ -71,7 +57,7 @@ async function addCheckinRow(data, s3Url) {
   }
 
   const result = await res.json();
-  console.log(`  AppSheet row added successfully`);
+  console.log(`  AppSheet row edited successfully`);
   return result;
 }
 
