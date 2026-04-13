@@ -35,7 +35,6 @@ async function addCheckinRow(data, s3Url) {
     Rows: [
       {
         'Sample_ID': data.report_no || '',  // key field — identifies the row
-        'Inspection Report Link':     s3Url    || '',  // fields to update
         'Report link': s3Url,
       },
     ],
