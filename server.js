@@ -132,6 +132,7 @@ function parsePayload(body) {
     id:              sample.id           || '',
     part_name:       sample.part_name    || '',
     part_number:     sample.part_number  || '',
+    assembly_dwg_img: samples.assembly_dwg_img || '',
     project_pocs:    sample.project_pocs || '',
     customer:        sample.customer_name|| '',
     created_by:      sample.created_by   || '',
