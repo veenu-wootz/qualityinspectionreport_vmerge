@@ -40,9 +40,7 @@ async function addToCheckin(data, s3Url) {
     Rows: [
       {
         'CheckIn ID':           data.report_no  || '',
-        'ID':                   data.id         || '',
-        'Assembly drawing':     data.assembly_dwg_img || '',
-        // 'Inspection Image':     data.assembly_dwg_img ||,    
+        'ID':                   data.id         || '',   
         'Status':               'Update',
         'Description':          'Please find the inspection report attached.',
         'Created by':           data.created_by || '',
