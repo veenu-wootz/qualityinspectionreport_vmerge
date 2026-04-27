@@ -25,6 +25,7 @@ const { buildMergedPDF } = require('./mergePDFs');
 const { sendQIREmail } = require('./sendEmail');
 const { uploadToS3 } = require('./awsUpload');
 const { addCheckinRow } = require('./appsheetRows');
+const { addToCheckin } = require('./appsheetCheckin');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -213,6 +214,7 @@ app.post('/generate', async (req, res) => {
  
         console.log('\n[4/5] Appending to Appsheet...');
         await addCheckinRow(data, driveUrl);
+        await addToCheckin(data, driveUrl);
       } catch (uploadErr) {
         // Non-fatal — log and continue to email
         console.error('  Appsheet error (non-fatal):', uploadErr.message);
