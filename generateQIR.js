@@ -281,19 +281,20 @@ async function generateQIR(data) {
     const dimHead = ['No.', 'Parameter'];
     if (showSpec)       dimHead.push('Specification');
     if (showInstrument) dimHead.push('Instrument');
+    if (showDimPhoto)   dimHead.push('Photo');    
     dimHead.push(...Array.from({ length: n }, (_, i) => `${i + 1}`));
     if (showStatus)     dimHead.push('Status');
     if (showDimComment) dimHead.push('Comments');
-    if (showDimPhoto)   dimHead.push('Photo');
+
 
     const dimBody = data.dimRows.map(r => {
       const row = [r.index, r.parameter];
       if (showSpec)       row.push(r.specificat   || '');
       if (showInstrument) row.push(r.instrument   || '');
+      if (showDimPhoto) row.push('');      
       row.push(...r.samples.slice(0, n).concat(Array(Math.max(0, n - r.samples.length)).fill('')));
       if (showStatus)   row.push(r.status_1 || '');
       if (showDimComment) row.push(r.comment || '');
-      if (showDimPhoto) row.push('');
       return row;
     });
 
@@ -301,10 +302,10 @@ async function generateQIR(data) {
     let ci = 2;
     const specIdx   = showSpec       ? ci++ : -1;
     const instrIdx  = showInstrument ? ci++ : -1;
+    const photoIdx  = showDimPhoto ? ci++   : -1;    
     const sampleStart = ci; ci += n;
     const statusIdx = showStatus   ? ci++ : -1;
-    const commentIdx = showDimComment ? ci++ : -1;
-    const photoIdx  = showDimPhoto ? ci   : -1;
+    const commentIdx = showDimComment ? ci : -1;
 
     const dimColStyles = {
       0: { cellWidth: FIXED_NO_W },
