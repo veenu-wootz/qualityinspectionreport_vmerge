@@ -144,6 +144,7 @@ function parsePayload(body) {
     samples_checked: sample.samples_checked || '',
     verified_by:     sample.verified_by  || 'Unverified',
     add_to_checkin:  sample.add_to_checkin === true || sample.add_to_checkin === 'true',
+    sample_type:     sample.sample_type || '',
     remarks:         sample.remark       || '',
     timestamp:       sample.timestamp    || '',
     conclusion:      '',
@@ -213,7 +214,9 @@ app.post('/generate', async (req, res) => {
         driveUrl = await uploadToS3(mergedBuffer, s3FileUrlName);
  
         console.log('\n[4/5] Appending to Appsheet...');
-        await addCheckinRow(data, driveUrl);
+        if (data.sample_type === 'Production sample') {
+          await addToCheckin(data, driveUrl);
+        }
         await addToCheckin(data, driveUrl);
       } catch (uploadErr) {
         // Non-fatal — log and continue to email
