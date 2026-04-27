@@ -10,7 +10,7 @@
 
 const fetch = require('node-fetch');
 
-const TABLE_NAME = 'Checkin';
+const TABLE_NAME = 'CheckIn';
 
 /**
  * Add one row to the Checkin table via AppSheet API.
