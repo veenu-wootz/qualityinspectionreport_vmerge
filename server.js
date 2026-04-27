@@ -122,7 +122,7 @@ function parsePayload(body) {
   }
 
   // Determine sample count from longest dim row
-  const sampleCount = dimRows.reduce((max, r) => Math.max(max, r.samples.length), 5);
+  const sampleCount = dimRows.reduce((max, r) => Math.max(max, r.samples.length), 1);
 
   return {
     // Header fields
