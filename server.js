@@ -216,6 +216,8 @@ app.post('/generate', async (req, res) => {
         console.log('\n[4/5] Appending to Appsheet...');
         if (data.sample_type === 'Production sample') {
           await addToCheckin(data, driveUrl);
+          // Small delay to avoid AppSheet rate limiting
+          await new Promise(resolve => setTimeout(resolve, 2000));
         }
         await addCheckinRow(data, driveUrl);
       } catch (uploadErr) {
