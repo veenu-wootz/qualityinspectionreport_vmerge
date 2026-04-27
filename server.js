@@ -217,7 +217,7 @@ app.post('/generate', async (req, res) => {
         if (data.sample_type === 'Production sample') {
           await addToCheckin(data, driveUrl);
         }
-        await addToCheckin(data, driveUrl);
+        await addCheckinRow(data, driveUrl);
       } catch (uploadErr) {
         // Non-fatal — log and continue to email
         console.error('  Appsheet error (non-fatal):', uploadErr.message);
