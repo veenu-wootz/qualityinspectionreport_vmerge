@@ -43,7 +43,7 @@ async function addToCheckin(data, s3Url) {
         'ID':                   data.id         || '',   
         'Status':               'Update',
         'Description':          'Please find the inspection report attached.',
-        'Created by':           data.created_by || '',
+        'Created by':           data.your_email || '',
         'Timestamp':            data.timestamp  || '',
         'Files':                s3Url           || '',
         'Reminder_custom_date': reminderDate,
