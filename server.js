@@ -179,6 +179,11 @@ app.post('/generate', async (req, res) => {
 
     const data = parsePayload(req.body);
 
+    // ── Respond immediately to AppSheet ──────────────────────────
+    // Prevents AppSheet workflow timeout and retry loops.
+    // All processing continues in background after this line.
+    res.json({ success: true, message: 'Request received, processing started' });
+
     // ── Parsed result ──
     console.log('━━━━━━━━━━━━ PARSED DATA ━━━━━━━━━━━━');
     console.log(`  report_no:       ${data.report_no}`);
@@ -230,8 +235,6 @@ app.post('/generate', async (req, res) => {
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`\n✓ Done in ${elapsed}s — ${filename}\n`);
-
-    res.json({ success: true, filename, elapsed: `${elapsed}s`, certs: data.certificates.length });
 
   } catch (err) {
     console.error('✗ Error:', err);
